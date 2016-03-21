@@ -1,0 +1,88 @@
+\documentclass[english]{article}
+
+\usepackage[latin9]{inputenc}
+\usepackage[letterpaper]{geometry}
+\geometry{verbose,tmargin=1in,bmargin=1in,lmargin=1in,rmargin=1in}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+
+\newcommand{\grav}{\overrightarrow{g}}
+\newcommand{\rotvec}{\overrightarrow{\theta}}
+
+\title{ESE 650, Learning in Robotics, Spring 2016: Project3 \\
+Yu-Cheng Lin}
+\date{}
+
+\begin{document}
+\maketitle
+\section*{Introduction}
+This project aims to identify gestures from IMU measurements using hidden Markov models. This model works for this project because of the richness in hidden states. Also, a Markov process naturally works for a series of measurement in time.
+\section*{Training Implmentation}
+Even though the implementation model is fairly straight forward, there are some nuances that I must look out for in order to train a reasonable model.
+\subsection{Model Choice}
+HMM comes in many different flavors. For this project specifically, I chose the bare minimum of the implementation: possible transition at every time step and discrete observation. I also counted each training instances as separate entities, i.e. each training instance has independent forward probability $\alpha$ and backward probability $\beta$. In EM, the sum of transition likelihood at a specific time step $\xi_t$ and its normalizing counterpart $\gamma_t$ are the cumulative sum across all the training examples. I started with this simple model because it is the easiest to implement and it is easy to vectorize in MATLAB. With enough cross validation and training, this model actually worked out to be good enough for gesture recognition.
+\subsection{Avoiding Underflow}
+Since HMM is a chained linear system, it is obvious that the probability of observing some output exponentially decays, and this leads to numerical underflow very quickly. To solve this problem, at every step of forward and backward propagation, I pull out the magnitude of the alpha and store it separately.
+\[
+\alpha_1 = C_1 \hat{\alpha_1}
+\] where $C_1 = |\alpha_t|_1$\\
+The sequential update for $C_{t+1}$ is then 
+\[
+C_{t+1} = C_t |\alpha_t|_1
+\]
+Note this still underflows, but now we can take the log of $C_t$ and store it, and the sequential update will be the sum of the logs.\\
+
+It is interesting that because of we are normalizing the sums of $xi$ and $gamma$, the magnitude drops out, even in the multiple training example case, rendering it useless in training. This log magnitude is useful in the final recognition since I need to evaluate the probability of a sequence given the model.
+\subsection{Local Maxima}
+HMM does not have one global maxima because of the latent variables (states). One way to find a good model via MLE is EM. However, EM frequently gets stuck in a local maxima. To find better local maxima, each model is trained multiple times with different random initial conditions. And the best model (highest joint probability across all the training examples) is chosen.
+\subsection{Regularization}
+Like discrete naive Bayes, HMM is also suceptable of making the conclusion that some emissions are impossible in certain states. This could either be a good or bad representation of the physical system depending on the physical system. However, concluding that the probability of a observation given some state is zero could lead to numerical instability. To compensate for this, if my MLE arrives a conclusion that a particular emission probability of zero, I will add a small number (1e-8) to the entry and renormalize the emission matrix. This framework allows me to avoid numerical problems. Also, if I somehow can obtain some prior knowledge about the physical system, I can do MAP with this approach.
+\subsection{Cross Validation}
+Due to lack of number in the training examples, I can easily do LOOCV. It turns out that the recognition is pretty robust to model complexity. The motions must be pretty different. I chose a model with 10 latent states and 25 output clusters in the end just because I liked these numbers.
+\section*{Test Set Performance}
+Here are my log probabilities and results on the test set
+
+Set1\\
+wave: -264.996 circle: -10568.685 eight: -5408.450 inf: -4748.574 beat3: -6035.371 beat4: -4169.930 \\
+Set2\\
+wave: -11493.305 circle: -21414.197 eight: -12389.684 inf: -9964.055 beat3: -1007.180 beat4: -1046.452 \\
+Set3\\
+wave: -13353.845 circle: -26814.579 eight: -2567.407 inf: -609.845 beat3: -13657.760 beat4: -12140.860 \\
+Set4\\
+wave: -7388.733 circle: -21618.892 eight: -18173.210 inf: -7465.702 beat3: -1525.996 beat4: -837.578 \\
+Set5\\
+wave: -21552.764 circle: -71.475 eight: -22888.085 inf: -21448.314 beat3: -7872.731 beat4: -7797.855 \\
+Set6\\
+wave: -15239.522 circle: -26492.039 eight: -3008.000 inf: -579.537 beat3: -14921.437 beat4: -12846.663 \\
+Set 7\\
+wave: -9315.530 circle: -25191.875 eight: -820.474 inf: -4772.733 beat3: -10595.424 beat4: -10461.393 \\
+Set 8\\
+wave: -10696.427 circle: -21587.194 eight: -11434.640 inf: -9634.286 beat3: -985.901 beat4: -1051.967 \\
+
+for test 1, the determined gesture is wave\\
+for test 2, the determined gesture is beat3\\
+for test 3, the determined gesture is inf\\
+for test 4, the determined gesture is beat4\\
+for test 5, the determined gesture is circle\\
+for test 6, the determined gesture is inf\\
+for test 7, the determined gesture is eight\\
+for test 8, the determined gesture is beat3\\
+
+\section*{State Visualization}
+
+Here is a visualization on the inferred hidden states of the data sets. I only plotted accelerometer data and states because otherwise the plot will be too complicated.\\
+
+\begin{center}
+\includegraphics[scale = 0.25]{set1.jpg}\\
+\includegraphics[scale = 0.25]{set2.jpg}\\
+\includegraphics[scale = 0.25]{set3.jpg}\\
+\includegraphics[scale = 0.25]{set4.jpg}\\
+\includegraphics[scale = 0.25]{set5.jpg}\\
+\includegraphics[scale = 0.25]{set6.jpg}\\
+\includegraphics[scale = 0.25]{set7.jpg}\\
+\includegraphics[scale = 0.25]{set8.jpg}\\
+\end{center}
+
+This looks like that it makes sense. Although there are multiple idle states, they are pretty consistent. The transitions sort of correlates the the peaks and throughs. The states kind of make physical sense.
+\end{document}
