@@ -15,29 +15,15 @@ function particles = odo_update( odo_data, odometry_std, particles )
     
     
     %% build rotation matrices
-    rotmat = zeros(2, 2, particle_num);
-    cosind1 = sub2ind([2, 2, particle_num], ones(particle_num, 1), ones(particle_num, 1), (1:particle_num)');
-    cosind2 = sub2ind([2, 2, particle_num], ones(particle_num, 1)*2, ones(particle_num, 1)*2, (1:particle_num)');
-    minussinind = sub2ind([2, 2, particle_num], ones(particle_num, 1), ones(particle_num, 1)*2, (1:particle_num)');
-    sinind = sub2ind([2, 2, particle_num], ones(particle_num, 1)*2, ones(particle_num, 1), (1:particle_num)');
+    odo_x = cos_thetas.*odo_data(1) - sin_thetas.*odo_data(2);
+    odo_y = sin_thetas.*odo_data(1) + cos_thetas.*odo_data(2);
     
-    rotmat(cosind1) = cos_thetas;
-    rotmat(cosind2) = cos_thetas;
-    rotmat(sinind) = sin_thetas;
-    rotmat(minussinind) = -sin_thetas;
+    odo_update = [odo_x, odo_y, repmat(odo_data(3), particle_num, 1)];
     
-    %% apply noise to odometry data
-    odo_noise = normrnd(repmat(odo_data', 1, particle_num), repmat(odometry_std', 1, particle_num)); 
-    odo_pos = reshape(odo_noise(1:2, :), [1, 2, particle_num]);
-    odo_angle = odo_noise(3, :)';
-    
-    odo_pos_update = sum(bsxfun(@times, rotmat, odo_pos), 2); %2x1xparticle num
-    odo_pos_update = reshape(odo_pos_update, [2, particle_num])'; %particle num x 2
+    %% apply noise
+    odo_update = normrnd(odo_update, repmat(odometry_std, particle_num, 1)); 
     
     %% update particles
-    particles(:, 1:2) = particles(:, 1:2) + odo_pos_update;
-    particles(:, 3) = particles(:, 3) + odo_angle; %updating angle is much more straight forward
-        
-    
+    particles = particles + odo_update;        
 end
 

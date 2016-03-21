@@ -1,8 +1,10 @@
-function [particles, weights, best_pose, MAP] = particle_filter( LidarData, odd_occ, odd_free, particles, weights, MAP)
+function [particles, weights, best_pose, MAP, xim, yim] = particle_filter( LidarData, odd_occ, odd_free, particles, weights, MAP)
     %% parameters
-    
+    persistent moving_avg;
+    moving_avg_window = 20;
+    update_thresh = 0.97;
     [particle_num, ~] = size(particles);
-    num_lidar_readings = 1081;
+    %num_lidar_readings = 1081;
     scan_angle = -135:0.25:135;
     scan_angle = scan_angle * pi / 180;
     
@@ -18,7 +20,7 @@ function [particles, weights, best_pose, MAP] = particle_filter( LidarData, odd_
     %if distance is greater than 30 that means the lidar didn't hit
     %anything
     %find valid lidar readings
-    ValidInd = (LidarData < 30) & (LidarData > 0.1);
+    ValidInd = (LidarData < 30) & (LidarData > 0.3);
     LidarData_pf = LidarData(ValidInd);
     scan_angle = scan_angle(ValidInd);
     
@@ -39,8 +41,8 @@ function [particles, weights, best_pose, MAP] = particle_filter( LidarData, odd_
         y_hit = LidarData_pf .* sin(phi) + py;
         
         %put it into the format that the correlation function likes
-        Y = [y_hit; x_hit; zeros(size(x_hit))];
-        
+        Y = [x_hit; y_hit; zeros(size(x_hit))];
+       
         %make local map from global map
         %first grab the range
         local_xmin = px+local_min;
@@ -60,27 +62,39 @@ function [particles, weights, best_pose, MAP] = particle_filter( LidarData, odd_
         %yis = (ceil((y_hit - py - local_min)./ MAP.res ));
         
         %then find the indicies to take from global map
-        x_MAP = ceil((x_im - MAP.xmin)./MAP.res);
-        y_MAP = ceil((y_im - MAP.ymin)./MAP.res);
+        %x_MAP = round((x_im - MAP.xmin)./MAP.res);
+        %y_MAP = round((MAP.ymax - y_im)./MAP.res);
         
         
-        [X_mesh, Y_mesh] = meshgrid(x_MAP, y_MAP);
-        ind_MAP = sub2ind([MAP.sizex, MAP.sizey], X_mesh, Y_mesh);
+        %[Y_mesh, X_mesh] = meshgrid(y_MAP, x_MAP);
+        %ind_MAP = sub2ind([MAP.sizey, MAP.sizex], Y_mesh, X_mesh);
         %finally, grab cell values from global map
-        local_map = MAP.map(ind_MAP);
+        %local_map = int8(MAP.logmap(ind_MAP));
         %define the range that i want to look for
-        x_range = 0;
-        y_range = 0;
+        %x_range = MAP.res:MAP.res:0.1*MAP.res;
+        %y_range = MAP.res:MAP.res:0.1*MAP.res;
+        %x_range = 0;
+        %y_range = 0;
         
         %calculate correlation
-        if (isempty(local_map) || isempty(x_im) || isempty(y_im))
+        if isempty(isempty(x_im) || isempty(y_im))
             corr_all(p) = 0;
         else
-            c = map_correlation(local_map, x_im, y_im, Y, x_range, y_range);
-            corr_all(p) = sum(sum(c));
+            %c = map_correlation(local_map, y_im, x_im, Y, x_range, y_range);
+            c = map_correlation(int8(MAP.logmap + 50), MAP.xmin:MAP.res:MAP.xmax, MAP.ymin:MAP.res:MAP.ymax, Y, 0, 0);
+            corr_all(p) = c;
+            
+            %{
+            [y_cor, x_cor] = ind2sub([3,3], correction);
+            %correct particle position
+            x_cor = (x_cor - 2)*0.1*MAP.res;
+            y_cor = (y_cor - 2)*0.1*MAP.res;
+            particles(p, 1) = particles(p, 1) + x_cor;
+            particles(p, 2) = particles(p, 2) + y_cor;
+            %}
+            
         end
     end
-    
     
     %% update weights
     weights = weights.*corr_all;
@@ -88,15 +102,35 @@ function [particles, weights, best_pose, MAP] = particle_filter( LidarData, odd_
     
     %% update map
     %find best particle
-    [~, best_p] = max(weights);
+    [best_corr, best_p] = max(corr_all);
     
+    if isempty(moving_avg)
+        moving_avg = ones(moving_avg_window,1) * best_corr;
+    end
+    
+    fprintf('best_corr: %.3f ', best_corr)
     best_pose = particles(best_p, :);
-    MAP = MAP_update(best_pose, LidarData, odd_occ, odd_free, MAP);
+    
+    if (1)% best_corr >= mean(moving_avg)*update_thresh && best_corr > 70000 %only update map when there's enough correlation
+        [MAP, xim, yim] = MAP_update(best_pose, LidarData, odd_occ, odd_free, MAP);
+    else
+        fprintf('no update ')
+        xim = ceil(best_pose(1) - MAP.xmin)./MAP.res;
+        yim = ceil(best_pose(2) - MAP.ymin)./MAP.res;
+    end
+    
+    moving_avg(1:moving_avg_window-1) = moving_avg(2:moving_avg_window);
+    moving_avg(moving_avg_window) = best_corr;
+    
+    
+    
     %% visualize for debugging
     
     
    %% resample
-   if (max(weights) > 0.5)
+   Neff = 1/sum(weights.^2);
+   if Neff < 0.3*particle_num
     [particles, weights] = resample_particle(particles, weights);
+    fprintf('resample')
    end
 end
